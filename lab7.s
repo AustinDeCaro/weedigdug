@@ -1,5 +1,5 @@
 	AREA interrupts, CODE, READWRITE
-	EXPORT lab6
+	EXPORT lab7
 	EXPORT FIQ_Handler
 	EXPORT pin_connect_block_setup
 	EXPORT interrupt_init
@@ -12,7 +12,7 @@
 	EXTERN div_and_mod
 
 intro_screen = "Welcome	to Wee Dig Dug!\r\nUse WASD keys to control movement\r\nPress spacebar to shoot air pump\r\nUser Interrupt Button pauses the game\r\nPress Enter to start: \r\n",0
-bounce_total = "SCORE: 00000\r\n",0 			;Score
+score_total = "SCORE: 00000\r\n",0 			;Score
 game_string = 			 	"ZZZZZZZZZZZZZZZZZZZZZ\r\n",0
 game_string1 = 			  	"Z                   Z\r\n",0
 game_string2 = 			  	"Z                   Z\r\n",0
@@ -33,58 +33,23 @@ game_stringG = 				"ZZZZZZZZZZZZZZZZZZZZZ\r\n",0
     
 	ALIGN
 
-lab6
+lab7
 		STMFD sp!, {lr}
-		BL read_character
-		;BL output_character
-		BL rng
-		MOV r0, r0, LSR #1
-		MOV r2, #0x2A					;Ascii for '*'
-		CMP r0, #0
-		BEQ	compute_place 
-		MOV r2, #0x23					;Ascii for '#'
-		CMP r0, #1
-		BEQ	compute_place
-		MOV r2, #0x40					;Ascii for '@'
-		CMP r0, #2
-		BEQ	compute_place
-		MOV r2, #0x58					;Ascii for 'X'
-		;ascii stored in r2
-compute_place
-		BL rng							;Row
-		MOV r1, r0
-		BL rng
-		ADD r0, r0, r1
-		ADD r3, r0 , #1					;Gives random row from 1-15	with higher priority of being in the center
-		;row # stored in r3
-		BL rng							;Repeat for column
-		MOV r1, r0
-		BL rng
-		ADD r0, r0, r1
-		ADD r5, r0 , #1					;Gives random column from 1-15 with higher priority of being in the center
+		LDR r4, =intro_screen
+		BL output_string
 
-		MOV r0, r3, LSL #4
-		ADD r0, r0, r5					;Puts row in upper bits 4-7, column in lower 4
-		MOV r1, r2
-		LDR r4, =0x40004000				;Position of the symbol 
-		STR r0, [r4]					;store location in memory
-		STR r2, [r4, #4]				;store symbol in memory
+read_start
+		BL read_character
+		CMP r0, #0xD					;wait for player to hit enter to start
+		BNE read_start
+
+		BL output_screen
+		LDR r0, =0x0000008D
+		MOV r1, #0x42
 		BL insert_symbol
 		BL output_screen
-initial_direction
-		BL rng
-		ADD r0, r0, #1
-		CMP r0, #4						;check if the random should be modified
-		BLE direction
-		SUB r0, r0, #4
-direction		
-		LDR r4, =0x40004008				;Position of the direction, offset by 8 from symbol 
-		STR r0, [r4]					;save direction into memory, 1 up, 2 right, 3 down, 4 left.
-		
-		LDR r4, =0x4000400C
-		MOV r0, #0
-		STR r0, [r4]					;This address hold the total # of wall bounces
-		BL interrupt_init
+							
+		BL interrupt_init		;Start Timers and such
 
 		LDR r0, =0xE000401C		;Match Register value
 		LDR r1, =0x00800000		;Clock will reset at this value
@@ -99,11 +64,47 @@ direction
 		STR r1, [r0,#4]			;reset the clock
 		BIC r1, r1, #2
 		STR r1, [r0, #4]
+		STMFD sp!, {lr}
+		BX lr
 
-lab6_loop
-		B lab6_loop
-done	LDMFD sp!, {lr}
-		BX lr 
+
+
+compute_enemy					;creates and stores enemy locations to memory
+		STMFD sp!, {r2-r4,lr}
+		MOV r1, #15
+compute_row
+		BL rng							;Row
+		ADD r2, r0 , #1					;Gives random row from 1-15
+		;row # stored in r2
+		CMP r2, #2
+		BLE compute_row
+compute_column
+		MOV r1, #19
+		BL rng							;Repeat for column1
+		ADD r3, r0 , #1					;Gives random column from 1-19
+		
+		CMP r3, #6
+		BLE location_exit
+		CMP r3, #14
+		BGE location_exit
+		   								;otherwise potentially too close to player
+		CMP	r2, #5
+		BLE location_exit
+		CMP r2, #11
+		BLT	compute_column
+location_exit
+		MOV r1, #4						;Compute initial direction
+		BL rng
+		ADD r0, r0, #1
+		MOV r0, r0, LSL #4
+		ADD r0, r0, r2
+		MOV r0, r2, LSL #5
+		ADD r0, r0, r3					;puts direction bits in bits 9-10,row in upper bits 5-8, column in lower 5
+		
+		STMFD sp!, {r2-r4, lr}
+		BX lr
+
+		 
 
 timer_init
 		STMFD SP!, {r0-r1, lr}   ; Save registers			
@@ -293,7 +294,7 @@ FIQ_Exit
 		SUBS pc, lr, #4
 
 ;BEGIN rng SUBROUTINE
-rng		   						;random number generated from 32 bit value passed through r0, and returned in r0 between 0-7
+rng		   						;random number generated from timer which will be less than the value stored in r1, returned in r0
 	STMFD sp!, { r2, r4, lr}
 	LDR	r4, =0xE0004008
 	LDR r0, [r4] 				;get number from timer
@@ -308,17 +309,21 @@ rng		   						;random number generated from 32 bit value passed through r0, and 
 ;END rng SUBROUTINE
 
 insert_symbol
-	STMFD sp!, {r0-r4,lr}			;r0 column and row lower 4 bits is column, upper 4 bits is row, r1 is symbol
-	AND r2, r0, #0xF		;extract column # into r2
+	STMFD sp!, {r0-r4,lr}			;r0 column and row lower 5 bits is column, upper 4 bits is row, r1 is symbol
+	AND r2, r0, #0x1F		;extract column # into r2
 
-	MOV r0, r0, LSR #4		;extract row # into r0
+	MOV r0, r0, LSR #5		;extract row # into r0
 	AND r0, r0, #0xF
 	LDR r4, =game_string
-	MOV r3, r0, LSL #4		;offset for memory is equal to 19*#rows + # of columns
+	MOV r3, r0, LSL #4		;offset for memory is equal to 24*#rows + # of columns
 	ADD r3, r0, r3
 	ADD r3, r0, r3
 	ADD r3, r0, r3
-	ADD r3, r0, r3			;Multiply # of rows by 19
+	ADD r3, r0, r3
+	ADD r3, r0, r3
+	ADD r3, r0, r3
+	ADD r3, r0, r3
+	ADD r3, r0, r3			;Multiply # of rows by 24
 	ADD r3, r2, r3			;Add # of columns
 	STRB r1, [r4, r3]		;Store the ascii in memory
 
@@ -329,13 +334,13 @@ output_screen
 	STMFD sp!, {r0,r4, lr}
 	MOV r0, #0xC
 	BL output_character
-	LDR r4, =bounce_total	;Output current bounce total
+	LDR r4, =score_total	;Output current bounce total
 	BL output_string
 	LDR r4, =game_string
 	MOV r0, #0				;Counter initialized to 0
 output_screen_loop
 	BL output_string
-	ADD r4, r4, #20
+	ADD r4, r4, #24
 	CMP r0, #16
 	ADD r0, r0, #1
 	BLE output_screen_loop
@@ -445,7 +450,7 @@ bounce_increment
 	LDR r0, [r4]
 	ADD r0, r0, #1
 	STR r0, [r4]
-	LDR r4, =bounce_total
+	LDR r4, =score_total
 	MOV r1, #100
 	BL div_and_mod				;divide by 100 to get 100's place digit
 	ADD r0, r0, #0x30
