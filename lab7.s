@@ -54,16 +54,27 @@ read_start
 		LDR r0, =0xE000401C		;Match Register value
 		LDR r1, =0x00800000		;Clock will reset at this value
 		STR r1, [r0]
-		LDR r0, =0xE0004014		;Match Control Register
+		LDR r0, =0xE0004014		;Match Control Register 0
 		LDR r1, [r0]
-		ORR r1, r1, #0x18		;Change bits 5 and 3 to 1 (Bit 5 stop counter, Bit 3 generates interrupt)
+		ORR r1, r1, #0x18		;Change bits 4 and 3 to 1 (Bit 4 reset counter, Bit 3 generates interrupt)
+		STR r1, [r0]
+		LDR r0, =0xE0008014		;Match Control Register 1
+		LDR r1, [r0]
+		ORR r1, r1, #0x28		;Change bits 5 and 3 to 1 (Bit 5 stop counter, Bit 3 generates interrupt)
 		STR r1, [r0]
 		LDR r0, =0xE0004000
 		LDR r1, [r0, #4]
 		ORR r1, #2
-		STR r1, [r0,#4]			;reset the clock
+		STR r1, [r0,#4]			;reset the clock 0
 		BIC r1, r1, #2
 		STR r1, [r0, #4]
+		LDR r0, =0xE0008000
+		LDR r1, [r0, #4]
+		ORR r1, #2
+		STR r1, [r0,#4]			;reset the clock 1
+		BIC r1, r1, #2
+		STR r1, [r0, #4]
+		;Start the game here
 		STMFD sp!, {lr}
 		BX lr
 
@@ -112,6 +123,10 @@ timer_init
 		LDR r1, [r0]
 		ORR r1, r1, #1
 		STR r1, [r0]
+		LDR r0, =0xE0008004		;Timer 1 Control Register
+		LDR r1, [r0]
+		ORR r1, r1, #1
+		STR r1, [r0]
 		LDMFD SP!, {r0-r1, lr}
 		BX lr
 
@@ -138,8 +153,9 @@ interrupt_init
 		LDR r1, [r0, #0xC]
 		ORR r1, r1, #0x8000 ; External Interrupt 1
 		ORR r1, r1, #0x40	; UART0 Interrupt
-		ORR r1, r1, #0x10	; Timer 0 Interupt
-			; Timer 0 Interupt
+		ORR r1, r1, #0x10	; Timer 0 Interrupt
+		ORR r1, r1, #0x20	; Timer 1 Interrupt
+		
 		STR r1, [r0, #0xC]
 
 		; Enable Interrupts
@@ -148,6 +164,7 @@ interrupt_init
 		ORR r1, r1, #0x8000 ; External Interrupt 1
 		ORR r1, r1, #0x40	; UART0 Interrupt
 		ORR r1, r1, #0x10	; Timer 0 Interrupt
+		ORR r1, r1, #0x20 	; Timer 1 Interrupt
 		STR r1, [r0, #0x10]
 
 		; External Interrupt 1 setup for edge sensitive
@@ -175,7 +192,7 @@ EINT1			; Check for EINT1 interrupt
 		LDR r0, =0xE01FC140
 		LDR r1, [r0]
 		TST r1, #2
-		BEQ TIMER
+		BEQ TIMER0
 		LDR r4, =0x40004000
 		LDR r0, [r4]			;load address of symbol
 		MOV r0, #0x20			;Put a space in memory at current location
@@ -201,10 +218,10 @@ direction_reset
 		STR r1, [r0]
 		B FIQ_Exit
 
-TIMER	LDR r0, =0xE0004000
+TIMER0	LDR r0, =0xE0004000
 		LDR r1, [r0]
 		TST r1, #2
-		BEQ UART0
+		BEQ TIMER1
 		BL update_screen
 		
 		LDR r0, =0xE0004000
@@ -213,6 +230,16 @@ TIMER	LDR r0, =0xE0004000
 		STR r1, [r0,#4]		;reset the clock
 		BIC r1, r1, #2
 		STR r1, [r0, #4]
+		ORR r1, r1, #2		; Clear Interrupt
+		STR r1, [r0]
+		B FIQ_Exit
+
+TIMER1	LDR r0, =0xE0008000
+		LDR r1, [r0]
+		TST r1, #2
+		BEQ UART0
+		;finish game code here
+		LDR r0, =0xE0008000
 		ORR r1, r1, #2		; Clear Interrupt
 		STR r1, [r0]
 		B FIQ_Exit
