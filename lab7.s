@@ -35,20 +35,87 @@ game_stringG = 				"ZZZZZZZZZZZZZZZZZZZZZ\r\n",0
 
 lab7
 		STMFD sp!, {lr}
+		MOV r0, #0
+		BL display_digit_on_7_seg
+		MOV r0, #0x77
+		BL illuminate_RGB_LED
 		LDR r4, =intro_screen
 		BL output_string
 
 read_start
 		BL read_character
 		CMP r0, #0xD					;wait for player to hit enter to start
-		BNE read_start
+		BNE read_start										
 
 		BL output_screen
-		LDR r0, =0x0000008D
+		LDR r4, =0x40004000
+		LDR r0, =0x7D0C
+		STR r0, [r4], #4
+		BL compute_enemy
+		STR r0, [r4], #4
+		BL compute_enemy
+		STR r0, [r4], #4
+		BL compute_enemy
+		STR r0, [r4], #4
+
+		LDR r4, =0x40004004
+		MOV r6, #0
+place_enemies
+		LDR r2, [r4], #4
+		LDR r3, =0xFFFFFE00				;Clear all but column row
+		BIC r0, r2, r3
 		MOV r1, #0x42
 		BL insert_symbol
-		BL output_screen
-							
+		MOV r1, #0x20
+		LSR r5, r2 #9					;Get direction as lower bits
+		CMP r5, #2
+		BGE	horizontal_big
+vertical_big
+		ADD r0, r0, #0x20				;Add 1 to rows LSB
+		BL insert_symbol
+		SUB r0, r0, #0x30				;Subtract 2 from row, making it 1 less than original row
+		BL insert_symbol
+		B little_enemies
+horizontal_big
+		ADD r0, r0, #0x20				;Add 1 to rows LSB
+		BL insert_symbol
+		SUB r0, r0, #0x30				;Subtract 2 from row, making it 1 less than original row
+		BL insert_symbol
+
+little_enemies
+		LDR r2, [r4], #4
+		LDR r3, =0xFFFFFE00				;Clear all but column row
+		BIC r0, r2, r3
+		MOV r1, #0x78
+		BL insert_symbol
+		MOV r1, #0x20
+		LSR r5, r2 #9					;Get direction as lower bits
+		CMP r5, #2
+		BGE	horizontal_little
+vertical_little
+		ADD r0, r0, #0x20				;Add 1 to rows LSB
+		BL insert_symbol
+		SUB r0, r0, #0x30				;Subtract 2 from row, making it 1 less than original row
+		BL insert_symbol
+		B game_begin
+horizontal_little
+		ADD r0, r0, #0x20				;Add 1 to rows LSB
+		BL insert_symbol
+		SUB r0, r0, #0x30				;Subtract 2 from row, making it 1 less than original row
+		BL insert_symbol
+		
+game_begin
+		CMP r6, #0
+		ADD r6, r6, #1
+		BEQ little_enemies				;If we need one more little enenmy, go back and do it again.
+		
+		MOV r0, #1						;Start level 1
+		BL display_digit_on_7_seg
+		MOV r0, #15						;Number of lives equals 4
+		BL illuminateLEDs
+		MOV r0, #0x67
+		BL illuminate_RGB_LED			;Change RGB to green to say game is going
+		
 		BL interrupt_init		;Start Timers and such
 
 		LDR r0, =0xE000401C		;Match Register value
@@ -75,6 +142,9 @@ read_start
 		BIC r1, r1, #2
 		STR r1, [r0, #4]
 		;Start the game here
+game_loop
+		B game_loop				;infinite loop to repeat while game is going on
+done
 		STMFD sp!, {lr}
 		BX lr
 
@@ -82,17 +152,15 @@ read_start
 
 compute_enemy					;creates and stores enemy locations to memory
 		STMFD sp!, {r2-r4,lr}
-		MOV r1, #15
+		MOV r1, #11
 compute_row
 		BL rng							;Row
-		ADD r2, r0 , #1					;Gives random row from 1-15
+		ADD r2, r0 , #3					;Gives random row from 3-12
 		;row # stored in r2
-		CMP r2, #2
-		BLE compute_row
 compute_column
-		MOV r1, #19
+		MOV r1, #15
 		BL rng							;Repeat for column1
-		ADD r3, r0 , #1					;Gives random column from 1-19
+		ADD r3, r0 , #3					;Gives random column from 3-17
 		
 		CMP r3, #6
 		BLE location_exit
@@ -104,15 +172,14 @@ compute_column
 		CMP r2, #11
 		BLT	compute_column
 location_exit
-		MOV r1, #4						;Compute initial direction
+		MOV r1, #4						;Compute initial direction (0 = up, 1 = down, 2 = left, 3 = right)
 		BL rng
-		ADD r0, r0, #1
 		MOV r0, r0, LSL #4
 		ADD r0, r0, r2
-		MOV r0, r2, LSL #5
+		MOV r0, r0, LSL #5
 		ADD r0, r0, r3					;puts direction bits in bits 9-10,row in upper bits 5-8, column in lower 5
 		
-		STMFD sp!, {r2-r4, lr}
+		LDMFD sp!, {r2-r4, lr}
 		BX lr
 
 		 
@@ -193,24 +260,29 @@ EINT1			; Check for EINT1 interrupt
 		LDR r1, [r0]
 		TST r1, #2
 		BEQ TIMER0
-		LDR r4, =0x40004000
-		LDR r0, [r4]			;load address of symbol
-		MOV r0, #0x20			;Put a space in memory at current location
-		BL insert_symbol		;clear symbol
-		MOV r0, #0x77
-		STR r0, [r4]			;store new symbol address
 		
-		BL rng
-		ADD r0, r0, #1
-		CMP r0, #4						;check if the random should be modified
-		BLE direction_reset
-		SUB r0, r0, #4
-direction_reset		
-		STR r0, [r4, #8]				;save direction into memory, 1 up, 2 right, 3 down, 4 left.
+toggle_clock
+		LDR r0, =0xE0004004		;Timer 0 Control Register
+		LDR r2, =0xE0004008		;Timer 1 Control Register
+		LDR r1, [r0]
+		LDR r3, [r2]
+		AND r1, r1, #1
+		CMP r1, #1				;check if timer is on
+		BEQ toggle_off
+toggle_on
+		;Remove PAUSE from score line
+		ORR r1, r1, #1			;turn timer 0 on if off
+		ORR r2, r2, #1			;turn timer 1 on if off
+		B toggle_finish
+toggle_off
+		;Add PAUSE to score line
+		BIC r1, r1, #1			;otherwise turn timer 0 off
+		BIC r2, r2, #1			;otherwise turn timer 1 off
+toggle_finish
+		STR r1, [r0]
+		STR r3, [r2]
 		
-		MOV r0, #0x77
-		LDR r1, [r4, #4]		;Load character from memory
-		BL insert_symbol
+		B FIQ_Exit
 		
 		LDR r0, =0xE01FC140
 		LDR r1, [r0]
@@ -222,7 +294,7 @@ TIMER0	LDR r0, =0xE0004000
 		LDR r1, [r0]
 		TST r1, #2
 		BEQ TIMER1
-		BL update_screen
+		BL output_screen
 		
 		LDR r0, =0xE0004000
 		LDR r1, [r0, #4]
@@ -251,61 +323,38 @@ UART0	;UART0 code here
 		BNE FIQ_Exit	;not the UART then exit
 		BL read_character	;Otherwise read from buffer
 		MOV r1, r0
-	    CMP r1, #0x2B			;'+'
-		BEQ increment_speed
-		CMP r1, #0x2D			;'-'
-		BEQ decrement_speed
-		LDR r4, =0x40004008		;location of direction
-		CMP r1, #0x75			;'u'
-		MOV r0, #1
+		CMP r1, #0x77			;'w'
+		MOV r0, #0x5E			;'^'
 		BEQ update_direction
-		CMP r1, #0x72			;'r'
-		MOV r0, #2
+		CMP r1, #0x61			;'a'
+		MOV r0, #0x3C			;'<'
+		BEQ update_direction
+		CMP r1, #0x73			;'s'
+		MOV r0, #0x76			;'v'
 		BEQ update_direction
 		CMP r1, #0x64			;'d'
-		MOV r0, #3
-		BEQ update_direction
-		CMP r1, #0x6C			;'l'
-		MOV r0, #4
+		MOV r0, #0x3E			;'>'
 		BEQ update_direction
 		CMP r1, #0x20			;' '
-		BEQ toggle_clock
+		BEQ fire_bullet
 		CMP r1, #0x71			;'q'
 		BEQ done
 		B FIQ_Exit
 		
+fire_bullet
+		;Do bullet calculation here
+		B FIQ_Exit
+		
 update_direction
+		LDR r4, =0x40004000		;location of character information
+		LSL r1, r0 #9			;Move new direction/character to upper portion of register
+		LDR r0, [r4]			
+		BIC r0, r0, #0x7FE00		;Clear the current direction
+		ORR r0, r0, r1			;Add new direction to character
+		;Set movement flag somewhere in memory, so on next clock update we can move the character.
 		STR r0, [r4]			;store new direction from input into memory
 		B FIQ_Exit
 		
-toggle_clock
-		LDR r0, =0xE0004004		;Timer 0 Control Register
-		LDR r1, [r0]
-		AND r1, r1, #1
-		CMP r1, #1				;check if timer is on
-		BEQ toggle_off
-toggle_on
-		ORR r1, r1, #1			;turn timer on if off
-		B toggle_finish
-toggle_off
-		BIC r1, r1, #1			;otherwise turn timer off
-toggle_finish
-		STR r1, [r0]
-		
-		B FIQ_Exit
-		
-decrement_speed
-		LDR r0, =0xE000401C		;Match Register value
-		LDR r1, [r0]
-		MOV r1, r1, LSL #1
-		STR r1, [r0]
-		B clock_reset
-increment_speed		
-		LDR r0, =0xE000401C		;Match Register value
-		LDR r1, [r0]
-		MOV r1, r1, LSR #1
-		STR r1, [r0]
-		B clock_reset
 clock_reset
 		LDR r0, =0xE0004000
 		LDR r1, [r0, #4]
@@ -326,7 +375,7 @@ rng		   						;random number generated from timer which will be less than the va
 	LDR	r4, =0xE0004008
 	LDR r0, [r4] 				;get number from timer
 	MOV r2, #-1
-	LSL r2, #4
+	LSL r2, #8
 	BIC r0, r0, r2 				;clear everything but lower 4 bits
 	BL div_and_mod
 	MOV r0, r1					;return mod as the result of rng
@@ -336,7 +385,7 @@ rng		   						;random number generated from timer which will be less than the va
 ;END rng SUBROUTINE
 
 insert_symbol
-	STMFD sp!, {r0-r4,lr}			;r0 column and row lower 5 bits is column, upper 4 bits is row, r1 is symbol
+	STMFD sp!, {r2-r4,lr}			;r0 column and row lower 5 bits is column, upper 4 bits is row, r1 is symbol
 	AND r2, r0, #0x1F		;extract column # into r2
 
 	MOV r0, r0, LSR #5		;extract row # into r0
@@ -354,7 +403,7 @@ insert_symbol
 	ADD r3, r2, r3			;Add # of columns
 	STRB r1, [r4, r3]		;Store the ascii in memory
 
-	LDMFD sp!, {r0-r4,lr}
+	LDMFD sp!, {r2-r4,lr}
 	BX lr
 	
 output_screen
