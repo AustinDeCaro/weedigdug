@@ -100,7 +100,7 @@ uart_init							;suburoutine that initializes the serial portion of the UART0 pr
 		MOV r0, #131
 		STRB r0,[r4]
 		LDR r4, =0xE000C000
-		MOV r0, #10
+		MOV r0, #5	;230400
 		STRB r0, [r4]
 		LDR r4, =0XE000C004
 		MOV r0, #0
