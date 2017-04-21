@@ -343,6 +343,8 @@ TIMER0	LDR r0, =0xE0004000
 		AND r0, r1, #1
 		CMP r0, #1
 		BLEQ update_player
+		;random chance of enemies changing direction
+		
 		BL update_big_enemy
 
 		BL update_small_enemy
@@ -482,6 +484,64 @@ output_screen_loop
 	BLE output_screen_loop
 
 	LDMFD sp!, {r0,r4, lr}
+	BX lr
+	
+monster_rng
+	STMFD sp!, {r0-r4,lr}
+	LDR r4, =0x40004004
+monster_rng_loop
+	MOV r1, #3
+	BL rng
+	LDR r2, [r4], #4
+	MOV r3, r2, LSR #9		;extract current direction
+	CMP r0, #1
+	LDR r1, =0x1FF			;Used to extract current location
+	BGT mons_rng_end
+	CMP r3, #2
+	BLT horizontal_change
+vertical_change
+	AND r0, r2, r1
+	ADD r0, r0, #0x20
+	BL get_symbol
+	CMP r1, #0x23
+	MOVNE r3, #1
+	BNE mons_rng_end
+	CMP r1, #0x5A
+	MOVNE r3, #1
+	BNE mons_rng_end
+	SUB r0, r0, #0x40
+	BL get_symbol
+	CMP r1, #0x23
+	MOVNE r3, #0
+	BNE mons_rng_end
+	CMP r1, #0x5A
+	MOVNE r3, #0
+	
+	B mons_rng_end
+horizontal_change
+	AND r0, r2, r1
+	ADD r0, r0, #1
+	BL get_symbol
+	CMP r1, #0x23
+	MOVNE r3, #2
+	BNE mons_rng_end
+	CMP r1, #0x5A
+	MOVNE r3, #2
+	BNE mons_rng_end
+	SUB r0, r0, #2
+	BL get_symbol
+	CMP r1, #0x23
+	MOVNE r3, #3
+	BNE mons_rng_end
+	CMP r1, #0x5A
+	MOVNE r3, #3
+mons_rng_end
+	ADD r0, r0, r3, LSL #9	;add the shifted new direction to monster location
+	STR r0, [r4,-4]			;store back new monster information
+	AND r3, r4, #0xC		;If we havent checked all three monsters, go back and do more rng for path finding
+	BLE monster_rng_loop
+	
+	LDMFD sp!, {r0-r4,lr}
 	BX lr
 	
 update_big_enemy
@@ -676,7 +736,7 @@ mov_up
 	LDR r0, [r4]				;location of symbol
 	LDR r1, =0xFFFFFE00
 	BIC r0, r0, r1				;clear direction bits
-	LDR r2, =0x40004004
+	LDR r2, =0x40004000
 overlap_up	
 	LDR r3, =0x40004010
 	CMP r2, r3
@@ -698,9 +758,9 @@ skip_up
 	SUB r0, r0, #0x20			;check the next location were moving to for walls or dirt
 	BL get_symbol				;returns in r1 the ascii of the symbol
 	CMP r1, #0x23
-	BEQ up_or_down				;currently turn down only moves the enemy down and changes direction but randomization can be added easily
+	BEQ mov_down				;currently turn down only moves the enemy down and changes direction but randomization can be added easily
 	CMP r1, #0x5A				;this is likely useless because of the restriction on moving into the air but may fix some bugs
-	BEQ up_or_down
+	BEQ mov_down
 	LDR r6, =0x40004000			
 	LDR r2, [r6]
 	LDR r1, =0xFFFFFE00
@@ -711,12 +771,11 @@ skip_up
 
 	AND r5, r0, #0x1E0			;Clear lower bits which are columns location
 	CMP r5, #0x40				;If row is 3, we need to bounce down
+	BEQ mov_down
 up_or_down
 	ADD r0, r0, #0x20			;returns r0 to original location
-	ADDEQ r0, r0, #0x20			;Move down based on condition
-	MOVEQ r2, #0x0200			;Direction is now down
-	SUBNE r0, r0, #0x20			;Move the symbol location up otherwise
-	MOVNE r2, #0x0000			;Direction is still up
+	SUB r0, r0, #0x20			;Move the symbol location up
+	MOV r2, #0x0000				;Direction is still up
 	LDR r5, =0x40004004
 	CMP r4, r5					;If this address for monster, it is the big monster. Otherwise small monster
 	MOVEQ r1, #0x42
@@ -730,7 +789,7 @@ mov_down
 	LDR r0, [r4]				;location of symbol
 	LDR r1, =0xFFFFFE00
 	BIC r0, r0, r1				;clear direction bits
-	LDR r2, =0x40004004
+	LDR r2, =0x40004000
 overlap_down	
 	LDR r3, =0x40004010
 	CMP r2, r3
@@ -752,9 +811,9 @@ skip_down
 	ADD r0, r0, #0x20			;check the next location were moving to for walls or dirt
 	BL get_symbol				;returns in r1 the ascii of the symbol
 	CMP r1, #0x23
-	BEQ down_or_up				;currently turn down only moves the enemy down and changes direction but randomization can be added easily
+	BEQ mov_up					;currently turn down only moves the enemy down and changes direction but randomization can be added easily
 	CMP r1, #0x5A				;this is likely useless because of the restriction on moving into the air but may fix some bugs
-	BEQ down_or_up
+	BEQ mov_up
 	LDR r6, =0x40004000			
 	LDR r2, [r6]
 	LDR r1, =0xFFFFFE00
@@ -764,10 +823,8 @@ skip_down
 	
 down_or_up
 	SUB r0, r0, #0x20			;returns r0 to original location
-	SUBEQ r0, r0, #0x20			;Move up based on condition
-	MOVEQ r2, #0x0000			;Direction is now up
-	ADDNE r0, r0, #0x20			;Move the symbol location down otherwise
-	MOVNE r2, #0x0200			;Direction is still down
+	ADD r0, r0, #0x20			;Move the symbol location down 
+	MOV r2, #0x0200				;Direction is still down
 	LDR r5, =0x40004004
 	CMP r4, r5					;If this address for monster, it is the big monster. Otherwise small monster
 	MOVEQ r1, #0x42
@@ -781,7 +838,7 @@ mov_left
 	LDR r0, [r4]				;location of symbol
 	LDR r1, =0xFFFFFE00
 	BIC r0, r0, r1				;clear direction bits	
-	LDR r2, =0x40004004
+	LDR r2, =0x40004000
 overlap_left	
 	LDR r3, =0x40004010
 	CMP r2, r3
@@ -803,9 +860,9 @@ skip_left
 	SUB r0, r0, #1				;check the next location were moving to for walls or dirt
 	BL get_symbol				;returns in r1 the ascii of the symbol
 	CMP r1, #0x23
-	BEQ left_or_right			;currently turn down only moves the enemy down and changes direction but randomization can be added easily
+	BEQ mov_right				;currently turn down only moves the enemy down and changes direction but randomization can be added easily
 	CMP r1, #0x5A				;this is likely useless because of the restriction on moving into the air but may fix some bugs
-	BEQ left_or_right
+	BEQ mov_right
 	LDR r6, =0x40004000			
 	LDR r2, [r6]
 	LDR r1, =0xFFFFFE00
@@ -815,10 +872,8 @@ skip_left
 	
 left_or_right
 	ADD r0, r0, #1				;returns r0 to original location
-	ADDEQ r0, r0, #1			;Move up based on condition
-	MOVEQ r2, #0x0400			;Direction is now right
-	SUBNE r0, r0, #1			;Move the symbol location left otherwise
-	MOVNE r2, #0x0600			;Direction is still left
+	SUB r0, r0, #1				;Move the symbol location left 
+	MOV r2, #0x0600				;Direction is still left
 	LDR r5, =0x40004004
 	CMP r4, r5					;If this address for monster, it is the big monster. Otherwise small monster
 	MOVEQ r1, #0x42
@@ -832,7 +887,7 @@ mov_right
 	LDR r0, [r4]				;location of symbol
 	LDR r1, =0xFFFFFE00
 	BIC r0, r0, r1				;clear direction bits
-	LDR r2, =0x40004004
+	LDR r2, =0x40004000
 overlap_right	
 	LDR r3, =0x40004010
 	CMP r2, r3
@@ -854,9 +909,9 @@ skip_right
 	ADD r0, r0, #1				;check the next location were moving to for walls or dirt
 	BL get_symbol				;returns in r1 the ascii of the symbol
 	CMP r1, #0x23
-	BEQ right_or_left			;currently turn down only moves the enemy down and changes direction but randomization can be added easily
+	BEQ mov_left				;currently turn down only moves the enemy down and changes direction but randomization can be added easily
 	CMP r1, #0x5A				;this is likely useless because of the restriction on moving into the air but may fix some bugs
-	BEQ right_or_left
+	BEQ mov_left
 	LDR r6, =0x40004000			
 	LDR r2, [r6]
 	LDR r1, =0xFFFFFE00
@@ -866,10 +921,8 @@ skip_right
 	
 right_or_left
 	SUB r0, r0, #1				;returns r0 to original location
-	SUBEQ r0, r0, #1			;Move left based on condition
-	MOVEQ r2, #0x0600			;Direction is now left
-	ADDNE r0, r0, #1			;Move the symbol location right otherwise
-	MOVNE r2, #0x0400			;Direction is still right
+	ADD r0, r0, #1				;Move the symbol location right otherwise
+	MOV r2, #0x0400				;Direction is still right
 	LDR r5, =0x40004004
 	CMP r4, r5					;If this address for monster, it is the big monster. Otherwise small monster
 	MOVEQ r1, #0x42
