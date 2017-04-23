@@ -13,8 +13,9 @@
 	EXTERN illuminate_RGB_LED
 	EXTERN illuminateLEDs
 	EXTERN display_digit_on_7_seg
+	EXTERN digits_SET
 
-intro_screen = "Welcome	to Wee Dig Dug!\r\nUse WASD keys to control movement\r\nPress spacebar to shoot air pump\r\nUser Interrupt Button pauses the game\r\nPress Enter to start: \r\n",0
+intro_screen = "Welcome	to Wee Dig Dug!\r\nUse WASD keys to control movement\r\nPress spacebar to shoot air pump\r\nUser Interrupt Button pauses the game\r\nTwo types of enemies: The fast ones 'B' and the slow ones 'x'/r/nThe game ends after you lose 4 lives or after two minutes\r\nPress Enter to start: \r\n",0
 score_total = "SCORE: 00000      \r\n",0 			;Score
 game_string = 			 	"ZZZZZZZZZZZZZZZZZZZZZ\r\n",0
 game_string1 = 			  	"Z                   Z\r\n",0
@@ -33,11 +34,24 @@ game_stringD = 				"Z###################Z\r\n",0
 game_stringE = 				"Z###################Z\r\n",0
 game_stringF = 				"Z###################Z\r\n",0
 game_stringG = 				"ZZZZZZZZZZZZZZZZZZZZZ\r\n",0
+play_again = "Hit Enter to Play Again, any other key to quit.\r\n",0
+game_times	
+		DCD 0x008CA000  ; level 1
+ 		DCD 0x00708000  ; level 2
+		DCD 0x00546000	; level 3
+		DCD 0x00384000	; level 4
+		DCD 0x001C2000	; level 5 and above 
     
 	ALIGN
 
 lab7
 		STMFD sp!, {lr}
+lab7_start
+		LDR r4, = game_string3
+		LDMIA r4, {r0-r3, r5,r6}
+		LDR r4, =0x40004020
+		STMIA r4, {r0-r3, r5,r6}  
+
 		MOV r0, #0
 		BL display_digit_on_7_seg
 		MOV r0, #0x77
@@ -49,8 +63,104 @@ read_start
 		BL read_character
 		CMP r0, #0xD					;wait for player to hit enter to start
 		BNE read_start										
+		BL output_screen
+
+		BL populate_board
+
+		
+game_begin
+		MOV r0, #0
+		STR r0, [r4], #4				;Store all 0 flags at flag memory address
+		STR r0, [r4]					;Store current score of 0
+		MOV r0, #1						;Start level 1
+		BL display_digit_on_7_seg
+		MOV r0, #15						;Number of lives equals 4
+		BL illuminateLEDs
+		MOV r0, #0x67
+		BL illuminate_RGB_LED			;Change RGB to green to say game is going
+		
+		BL interrupt_init		;Start Timers and such
+
+		LDR r0, =0xE000401C		;Match Register value
+		LDR r1, =0x008CA000		;Clock will reset at this value
+		STR r1, [r0]
+
+		LDR r0, =0xE000801C	 	;Match Register Value timer 1
+		LDR	r1, =0x83D60000
+		STR r1, [r0] 
+		STR r1, [r0]
+		LDR r0, =0xE0004014		;Match Control Register 0
+		LDR r1, [r0]
+		ORR r1, r1, #0x18		;Change bits 4 and 3 to 1 (Bit 4 reset counter, Bit 3 generates interrupt)
+		STR r1, [r0]
+		LDR r0, =0xE0008014		;Match Control Register 1
+		LDR r1, [r0]
+		ORR r1, r1, #0x28		;Change bits 5 and 3 to 1 (Bit 5 stop counter, Bit 3 generates interrupt)
+		STR r1, [r0]
+		LDR r0, =0xE0004000
+		LDR r1, [r0, #4]
+		ORR r1, #2
+		STR r1, [r0,#4]			;reset the clock 0
+		BIC r1, r1, #2
+		STR r1, [r0, #4]
+		LDR r0, =0xE0008000
+		LDR r1, [r0, #4]
+		ORR r1, #2
+		STR r1, [r0,#4]			;reset the clock 1
+		BIC r1, r1, #2
+		STR r1, [r0, #4]
 
 		BL output_screen
+		;Start the game here
+game_loop
+		B game_loop				;infinite loop to repeat while game is going on
+done
+		LDR r4, =0x40004020
+		LDMIA r4, {r0-r3, r5,r6};Stored 1 line of board that has all 
+		LDR r4, =game_string3
+		MOV r7, #0
+reset_level_loop
+		STMIA r4!, {r0-r3, r5, r6}
+		ADD r7, r7, #1
+		CMP r7, #12
+		BLE reset_level_loop
+		LDR r4, =0x40004000
+		LDR r0, =0x7D0A			;player starting position
+		STR r0, [r4]
+		LDR r2, =0x1FF
+		LSR r1, r0, #9
+		AND r0, r0, r2
+		BL insert_symbol
+		MOV r1, #0x20
+		ADD r0, r0, #1
+		BL insert_symbol
+		SUB r0, r0, #2
+		BL insert_symbol		
+
+		BL output_screen
+
+
+
+		
+
+		LDR r4, =0x40004014
+		MOV r2, #0
+		STR r2, [r4]
+		BL increment_score
+
+		LDR r4, =play_again
+		BL output_string
+
+		BL read_character
+		CMP r0, #0xD
+		
+
+		BEQ lab7_start
+
+		LDMFD sp!, {lr}
+		BX lr
+populate_board
+		STMFD sp!, {r0-r3,r5, r6, lr}
 		LDR r4, =0x40004000
 		LDR r0, =0x7D0A
 		STR r0, [r4], #4
@@ -100,66 +210,21 @@ vertical_little
 		BL insert_symbol
 		SUB r0, r0, #0x40				;Subtract 2 from row, making it 1 less than original row
 		BL insert_symbol
-		B game_begin
+		B populate_end
 horizontal_little
 		ADD r0, r0, #1				;Add 1 to rows LSB
 		BL insert_symbol
 		SUB r0, r0, #2				;Subtract 2 from row, making it 1 less than original row
 		BL insert_symbol
-		
-game_begin
+populate_end
 		CMP r6, #0
 		ADD r6, r6, #1
 		BEQ little_enemies				;If we need one more little enenmy, go back and do it again.
-		
-		MOV r0, #0
-		STR r0, [r4], #4				;Store all 0 flags at flag memory address
-		STR r0, [r4]					;Store current score of 0
-		MOV r0, #1						;Start level 1
-		BL display_digit_on_7_seg
-		MOV r0, #15						;Number of lives equals 4
-		BL illuminateLEDs
-		MOV r0, #0x67
-		BL illuminate_RGB_LED			;Change RGB to green to say game is going
-		
-		BL interrupt_init		;Start Timers and such
-
-		LDR r0, =0xE000401C		;Match Register value
-		LDR r1, =0x00800000		;Clock will reset at this value
-		STR r1, [r0]
-		LDR r0, =0xE0004014		;Match Control Register 0
-		LDR r1, [r0]
-		ORR r1, r1, #0x18		;Change bits 4 and 3 to 1 (Bit 4 reset counter, Bit 3 generates interrupt)
-		STR r1, [r0]
-		LDR r0, =0xE0008014		;Match Control Register 1
-		LDR r1, [r0]
-		ORR r1, r1, #0x28		;Change bits 5 and 3 to 1 (Bit 5 stop counter, Bit 3 generates interrupt)
-		STR r1, [r0]
-		LDR r0, =0xE0004000
-		LDR r1, [r0, #4]
-		ORR r1, #2
-		STR r1, [r0,#4]			;reset the clock 0
-		BIC r1, r1, #2
-		STR r1, [r0, #4]
-		LDR r0, =0xE0008000
-		LDR r1, [r0, #4]
-		ORR r1, #2
-		STR r1, [r0,#4]			;reset the clock 1
-		BIC r1, r1, #2
-		STR r1, [r0, #4]
-
-		BL output_screen
-		;Start the game here
-game_loop
-		B game_loop				;infinite loop to repeat while game is going on
-done
-		LDMFD sp!, {r0-r12,lr}
-		LDMFD sp!, {lr}
+		LDMFD sp!, {r0-r3,r5, r6, lr}
 		BX lr
 
 
-
-compute_enemy					;creates and stores enemy locations to memory
+compute_enemy							;creates and stores enemy locations to memory
 		STMFD sp!, {r2-r4,lr}
 		MOV r1, #11
 compute_row
@@ -194,7 +259,7 @@ location_exit
 		 
 
 timer_init
-		STMFD SP!, {r0-r1, lr}   ; Save registers			
+		STMFD SP!, {r0-r1, lr}  ; Save registers			
 		LDR r0, =0xE0004004		;Timer 0 Control Register
 		LDR r1, [r0]
 		ORR r1, r1, #1
@@ -338,19 +403,42 @@ TIMER0	LDR r0, =0xE0004000
 		LDR r1, [r0]
 		TST r1, #2
 		BEQ TIMER1
+		MOV r0, #0x67
+		BL illuminate_RGB_LED
+
 		LDR r4, =0x40004010	;Flag address
 		LDR r1, [r4]
+		;BL monster_rng
+		AND r0, r1, #2
+		CMP r0, #2
+		LDREQ r4, =0x40004004
+		BLEQ remove_monster
+		CMP r0, #2
+		BLNE update_big_enemy
+
+		LDR r4, =0x40004018	;Every other cycle flag
+		LDR r2, [r4]
+		CMP r2, #1
+		MOVEQ r2, #0
+		MOVNE r2, #1
+		STR r2, [r4]
+		BNE	player_move
+		AND r0, r1, #4
+		CMP r0, #4
+		LDREQ r4, =0x40004008
+		BLEQ remove_monster
+		CMP r0, #4
+		BLNE update_small_enemy
+		AND r0, r1, #8
+		CMP r0, #8
+		LDREQ r4, =0x4000400C
+		BLEQ remove_monster
+		CMP r0, #8
+		BLNE update_small_enemy2
+player_move
 		AND r0, r1, #1
 		CMP r0, #1
 		BLEQ update_player
-		;random chance of enemies changing direction
-		
-		BL update_big_enemy
-
-		BL update_small_enemy
-		BL update_small_enemy2
-
-		
 		
 timer_clear
 		BL output_screen
@@ -362,13 +450,18 @@ timer_clear
 		STR r1, [r0, #4]
 		ORR r1, r1, #2		; Clear Interrupt
 		STR r1, [r0]
+		LDR r4, =0x40004010
+		LDR r0, [r4]
+		AND r0, r0, #14
+		CMP r0, #14
+		BEQ new_level
 		B FIQ_Exit
 
 TIMER1	LDR r0, =0xE0008000
 		LDR r1, [r0]
 		TST r1, #2
 		BEQ UART0
-		;finish game code here
+		B game_over
 		LDR r0, =0xE0008000
 		ORR r1, r1, #2		; Clear Interrupt
 		STR r1, [r0]
@@ -394,14 +487,179 @@ UART0	;UART0 code here
 		MOV r0, #0x3E			;'>'
 		BEQ update_direction
 		CMP r1, #0x20			;' '
-		BEQ fire_bullet
+		BEQ bullet_fired
 		CMP r1, #0x71			;'q'
 		BEQ done
 		B FIQ_Exit
 		
-fire_bullet
-		;Do bullet calculation here
-		B FIQ_Exit
+bullet_fired
+	MOV r0, #0x72  				;'r'
+	BL illuminate_RGB_LED
+	LDR r4, =0x40004000				;player position address
+	LDR r2, [r4]					;load location to r2
+	LSR r3, r2, #9
+	LDR r1, =0x1FF
+	AND r2, r2, r1
+	;getplayer direction in r3
+	CMP r3, #0x5E
+	BEQ bullet_up
+	CMP r3, #0x76
+	BEQ bullet_down
+	CMP r3, #0x3E
+	BEQ bullet_right
+	CMP r3, #0x3C
+	BEQ bullet_left
+bullet_up
+	SUB r2, r2, #0x20
+	MOV r0, r2
+	BL get_symbol					;return in r0?
+	CMP r1, #0x23					;DIRT-ASCII
+	BEQ end_bullet
+	CMP r1, #0x5A					;WALL ASCII
+	BEQ end_bullet
+	CMP r1, #0x42					;big enemy ascii
+	BLEQ big_enemy_death
+	CMP r1, #0x78					;little enemy ascii
+	BLEQ little_enemy_death			
+	B bullet_up
+bullet_down
+	ADD r2, r2, #0x20
+	MOV r0, r2
+	BL get_symbol					;return in r0?
+	CMP r1, #0x23					;DIRT-ASCII
+	BEQ end_bullet
+	CMP r1, #0x5A					;WALL ASCII
+	BEQ end_bullet
+	CMP r1, #0x42					;big enemy ascii
+	BLEQ big_enemy_death
+	CMP r1, #0x78					;little enemy ascii
+	BLEQ little_enemy_death			
+	B bullet_down
+bullet_right
+	ADD r2, r2, #1
+	MOV r0, r2
+	BL get_symbol					;return in r0?
+	CMP r1, #0x23					;DIRT-ASCII
+	BEQ end_bullet
+	CMP r1, #0x5A					;WALL ASCII
+	BEQ end_bullet
+	CMP r1, #0x42					;big enemy ascii
+	BLEQ big_enemy_death
+	CMP r1, #0x78					;little enemy ascii
+	BLEQ little_enemy_death			
+	B bullet_right
+bullet_left
+	SUB r2, r2, #1
+	MOV r0, r2
+	BL get_symbol					;return in r0?
+	CMP r1, #0x23					;DIRT-ASCII
+	BEQ end_bullet
+	CMP r1, #0x5A					;WALL ASCII
+	BEQ end_bullet
+	CMP r1, #0x42					;big enemy ascii
+	BEQ big_enemy_death
+	CMP r1, #0x78					;little enemy ascii
+	BEQ little_enemy_death			
+	B bullet_left
+
+big_enemy_death
+	MOV r3, r2
+	MOV r2, #100			;add 100 to score
+	BL increment_score
+	MOV r2, r3						
+							
+	LDR r4, =0x40004004     ;big enemy data
+	LDR r6, [r4]
+	LDR r3, =0xFFFFFE00
+	BIC r0, r6, r3			;get location of big guy
+	MOV r1, #0x2A			;remove from board
+	BL insert_symbol
+	B end_bullet
+little_enemy_death
+	MOV r3, r2
+	MOV r2, #50				;add 50 to score
+	BL increment_score
+	MOV r2, r3						
+	LDR r4, =0x40004008     ;small enemy data
+	LDR r6, [r4]
+	LDR r1, =0x1FF
+	AND r6, r6, r1
+	CMP r2, r6
+	BEQ small_found
+	
+
+	LDR r4, =0x4000400C    	;smol enemy data 2
+	LDR r6, [r4]
+	LDR r1, =0x1FF
+	AND r6, r6, r1
+small_found
+		
+	MOV r0, r6
+	MOV r1, #0x2A			;remove from board
+	BL insert_symbol
+	B end_bullet
+end_bullet
+	
+	B FIQ_Exit
+
+new_level
+	LDR r4, =0x40004020
+	LDMIA r4, {r0-r3, r5,r6};Stored 1 line of board that has all 
+	LDR r4, =game_string3
+	MOV r7, #0
+new_level_loop
+	STMIA r4!, {r0-r3, r5, r6}
+	ADD r7, r7, #1
+	CMP r7, #12
+	BLE new_level_loop
+	
+	LDR r4, =0x40004000
+	LDR r0, =0x7D0A			;player starting position
+	STR r0, [r4]
+	LDR r2, =0x1FF
+	LSR r1, r0, #9
+	AND r0, r0, r2
+	BL insert_symbol
+	MOV r1, #0x20
+	ADD r0, r0, #1
+	BL insert_symbol
+	SUB r0, r0, #2
+	BL insert_symbol
+
+	BL populate_board
+	
+	LDR r4,=0x40004010
+	MOV r0, #0
+	STR r0, [r4]			;reset all flags 
+	
+	LDR r4, =0xE0028000				;read register for port 0
+	LDR r1, [r4]					;load states of all ports in port 0
+	LDR r5, =0xFFFFC07F				;Clear everything but 7-13
+	BIC r1, r1, r5
+	LDR r3, =digits_SET
+	MOV r2, #0				;offset
+level_up 
+  	MOV r5, r2, LSL #2  			; Each stored value is 32 bits 
+  	LDR r0, [r3, r5]   				; Load IOSET pattern for digit in r0
+	BIC r0, r0, r5			;Clear everything but 7-13
+	ADD r2, r2, #1			;increment offset
+	CMP r1, r0
+	BNE level_up
+	
+	MOV r0, r2
+	BL display_digit_on_7_seg
+	
+	CMP r0, #5
+	MOVGT r0, #5
+	SUB r0, r0, #1			;correct offset for look up table is 1 minus the level
+	LSL r0, r0, #2
+	LDR r4, =game_times
+	LDR r1, [r4, r0]
+	LSR r1, r1, #8
+	LDR r4, =0xE000401C
+	STR r1, [r4]  
+
+	B FIQ_Exit
 		
 update_direction
 		LDR r4, =0x40004000		;location of character information
@@ -430,6 +688,22 @@ FIQ_Exit
 
 		LDMFD SP!, {r0-r12, lr}
 		SUBS pc, lr, #4
+	LTORG
+remove_monster
+	STMFD sp!, {r0, r1, r4, lr}
+	LDR r0, [r4]
+	CMP r0, #0
+	BEQ rem_mon_done
+	LDR r1, =0x1FF
+	AND r0, r0, r1
+	MOV r1, #0x20
+	BL insert_symbol
+	MOV r0, #0
+	STR r0, [r4]
+rem_mon_done
+	LDMFD sp!, {r0, r1, r4, lr}
+	BX lr
+
 
 ;BEGIN rng SUBROUTINE
 rng		   						;random number generated from timer which will be less than the value stored in r1, returned in r0
@@ -479,7 +753,7 @@ output_screen
 output_screen_loop
 	BL output_string
 	ADD r4, r4, #24
-	CMP r0, #16
+	CMP r0, #15
 	ADD r0, r0, #1
 	BLE output_screen_loop
 
@@ -537,7 +811,7 @@ horizontal_change
 	MOVNE r3, #3
 mons_rng_end
 	ADD r0, r0, r3, LSL #9	;add the shifted new direction to monster location
-	STR r0, [r4,-4]			;store back new monster information
+	STR r0, [r4,#-4]			;store back new monster information
 	AND r3, r4, #0xC		;If we havent checked all three monsters, go back and do more rng for path finding
 	BLE monster_rng_loop
 	
@@ -545,10 +819,19 @@ mons_rng_end
 	BX lr
 	
 update_big_enemy
-	STMFD sp!, {lr}
+	STMFD sp!, {r0-r6,lr}
 	LDR r4,= 0x40004004	;location of the big enemy		;0 up, 2 right, 1 down, 3 left.
-	LDR r1, [r4]
-	LSR r1, r1, #9		;Put direction as LSBs
+	LDR r2, [r4]
+	LDR r1, =0x1FF
+	AND r0, r1, r2
+	BL get_symbol
+	CMP r1, #0x2A
+		LDREQ r4, =0x40004010
+		LDREQ r1, [r4]
+		ORREQ r1, r1, #2
+		STREQ r1, [r4]
+		BEQ update_done 
+	LSR r1, r2, #9		;Put direction as LSBs
 	CMP r1, #0
 	BEQ mov_up
 	CMP r1, #2
@@ -558,7 +841,7 @@ update_big_enemy
 	CMP r1, #3
 	BEQ mov_left
 update_player
-	STMFD sp!, {lr}
+	STMFD sp!, {r0-r6,lr}
 	LDR r4, =0x40004010
 	LDR r1, [r4]
 	BIC r1, r1, #1
@@ -575,10 +858,19 @@ update_player
 	CMP r1, #0x3C
 	BEQ player_mov_left	
 update_small_enemy	
-	STMFD sp!, {lr}
+	STMFD sp!, {r0-r6,lr}
 	LDR r4, =0x40004008	;location of the small enemy		;0 up, 2 right, 1 down, 3 left.
-	LDR r1, [r4]
-	LSR r1, r1, #9
+	LDR r2, [r4]
+	LDR r1, =0x1FF
+	AND r0, r1, r2
+	BL get_symbol
+	CMP r1, #0x2A
+		LDREQ r4, =0x40004010
+		LDREQ r1, [r4]
+		ORREQ r1, r1, #4
+		STREQ r1, [r4]
+		BEQ update_done
+	LSR r1, r2, #9
 	CMP r1, #0
 	BEQ mov_up
 	CMP r1, #2
@@ -588,10 +880,19 @@ update_small_enemy
 	CMP r1, #3
 	BEQ mov_left
 update_small_enemy2	
-	STMFD sp!, {lr}
+	STMFD sp!, {r0-r6,lr}
 	LDR r4, =0x4000400C	;location of the small enemy		;0 up, 2 right, 1 down, 3 left.
-	LDR r1, [r4]
-	LSR r1, r1, #9
+	LDR r2, [r4]
+	LDR r1, =0x1FF
+	AND r0, r1, r2
+	BL get_symbol
+	CMP r1, #0x2A
+		LDREQ r4, =0x40004010
+		LDREQ r1, [r4]
+		ORREQ r1, r1, #8
+		STREQ r1, [r4]
+		BEQ update_done
+	LSR r1, r2, #9
 	CMP r1, #0
 	BEQ mov_up
 	CMP r1, #2
@@ -729,7 +1030,7 @@ update_player_done
 	BIC r0, r0, r1
 	MOV r1, r2
 	BL insert_symbol
-	LDMFD sp!, {lr}
+	LDMFD sp!, {r0-r6,lr}
 	BX lr
 	
 mov_up
@@ -911,7 +1212,8 @@ skip_right
 	CMP r1, #0x23
 	BEQ mov_left				;currently turn down only moves the enemy down and changes direction but randomization can be added easily
 	CMP r1, #0x5A				;this is likely useless because of the restriction on moving into the air but may fix some bugs
-	BEQ mov_left
+	BEQ mov_left								  
+
 	LDR r6, =0x40004000			
 	LDR r2, [r6]
 	LDR r1, =0xFFFFFE00
@@ -933,7 +1235,7 @@ right_or_left
 	B update_done
 
 update_done
-	LDMFD sp!, {lr}
+	LDMFD sp!, {r0-r6,lr}
 	BX lr
 
 get_symbol
@@ -998,11 +1300,39 @@ player_death
 
 	BL illuminateLEDs
 	CMP r1, #1
-	LDMFD sp!, {lr}
+	LDMFD sp!, {r0-r6,lr}
 	BEQ game_over
 	B timer_clear
 
 game_over
+	LDR r4, =0xE0028010
+	LDR r0, [r4]
+	MOV r2, #-1
+	MOV r1, #0
+	EOR r0, r0, r2					;flip all bits
+	MOV r0, r0, LSR #16				;Right shift to get pin 20's value as LSB
+   	AND r2, r0, #1
+	ADD r1, r1, r2
+	LSR r0, r0, #1
+	AND r2, r0, #1
+	ADD r1, r1, r2
+	LSR r0, r0, #1
+	AND r2, r0, #1
+	ADD r1, r1, r2
+	LSR r0, r0, #1
+	AND r2, r0, #1
+	ADD r1, r1, r2					;Get # of leds currently on
+	MOV r0, #250
+	LSL r0, #1
+live_score
+	CMP r1, #0
+	BEQ game_over_done
+	BL increment_score
+	SUB r1, r1, #1
+	B live_score
+game_over_done
+	MOV r0, #0x72
+	BL illuminate_RGB_LED
 	B done	
 	
 increment_score

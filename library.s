@@ -100,7 +100,7 @@ uart_init							;suburoutine that initializes the serial portion of the UART0 pr
 		MOV r0, #131
 		STRB r0,[r4]
 		LDR r4, =0xE000C000
-		MOV r0, #5	;230400
+		MOV r0, #1	;1152000
 		STRB r0, [r4]
 		LDR r4, =0XE000C004
 		MOV r0, #0
@@ -188,6 +188,7 @@ display_digit_on_7_seg						;displays a hex-digit on the 7-segment display passe
   			MOV r0, r0, LSL #2  			; Each stored value is 32 bits 
   			LDR r2, [r3, r0]   				; Load IOSET pattern for digit in r0 
   			STR r2, [r1]    			; Display (0x4 = offset to IOSET
+			MOV r0, r0, LSR #2
 			LDMFD sp!, {lr}
 			BX lr
 ;end display_digit_on_7_seg subroutine
